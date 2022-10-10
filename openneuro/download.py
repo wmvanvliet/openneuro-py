@@ -202,11 +202,15 @@ def _get_download_metadata(*,
         if 'errors' in response_json:
             msg = response_json["errors"][0]["message"]
             if msg == 'You do not have access to read this dataset.':
-                raise RuntimeError('It seems you do not have access to this '
-                                   'dataset. If this is a restricted dataset, '
-                                   'please use the "openneuro-py login" '
-                                   'command to configure an API token for '
-                                   'authentication.')
+                try:
+                    get_token()
+                    raise RuntimeError('It seems you do not have access to '
+                                       'this dataset.')
+                except ValueError as e:
+                    # No token configured
+                    raise RuntimeError('It seems you do not have access to '
+                                       'this dataset and authentication '
+                                       f'failed. {e}')
             else:
                 raise RuntimeError(f'Query failed: "{msg}"')
         elif tag is None:
