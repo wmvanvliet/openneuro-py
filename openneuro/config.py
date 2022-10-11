@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import stat
 import json
 import getpass
 
@@ -26,6 +27,7 @@ def init_config() -> None:
                   errorReporting=False)
     with open(config_fname, 'w', encoding='utf-8') as f:
         json.dump(config, f)
+    os.chmod(config_fname, stat.S_IRUSR)
 
 
 def load_config() -> dict:
