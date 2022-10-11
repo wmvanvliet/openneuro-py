@@ -203,14 +203,18 @@ def _get_download_metadata(*,
             msg = response_json["errors"][0]["message"]
             if msg == 'You do not have access to read this dataset.':
                 try:
+                    # Do we have an API token?
                     get_token()
-                    raise RuntimeError('It seems you do not have access to '
-                                       'this dataset.')
+                    raise RuntimeError('We were not permitted to download '
+                                       'this dataset. Perhaps your user '
+                                       'does not have access to it, or '
+                                       'your API token is wrong.')
                 except ValueError as e:
-                    # No token configured
-                    raise RuntimeError('It seems you do not have access to '
-                                       'this dataset and authentication '
-                                       f'failed. {e}')
+                    # We don't have an API token.
+                    raise RuntimeError('It seems that this is a restricted '
+                                       'dataset. However, your API token is '
+                                       'not configured properly, so we could '
+                                       f'not log you in. {e}')
             else:
                 raise RuntimeError(f'Query failed: "{msg}"')
         elif tag is None:
