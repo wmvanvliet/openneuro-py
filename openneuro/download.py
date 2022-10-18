@@ -4,7 +4,7 @@ import fnmatch
 from difflib import get_close_matches
 import hashlib
 import asyncio
-from pathlib import Path
+from pathlib import Path, PosixPath
 import string
 import json
 from typing import Optional, Union
@@ -459,7 +459,12 @@ async def _retrieve_and_write_to_disk(
                     hash.update(chunk)
 
         if verify_hash and remote_file_hash is not None:
-            assert hash.hexdigest() == remote_file_hash
+            got = hash.hexdigest()
+            if got != remote_file_hash:
+                raise RuntimeError(
+                    f'Hash mismatch for:\n{outfile}\n'
+                    f'Expected:\n{remote_file_hash}\nGot:\n{got}'
+                )
 
         # Check the file was completely downloaded.
         if verify_size:
@@ -471,6 +476,23 @@ async def _retrieve_and_write_to_disk(
                     f'Server claimed size of {outfile} would be '
                     f'{remote_file_size} bytes, but downloaded '
                     f'{local_file_size} bytes.')
+    # Secondary check: try loading as JSON for "error" entry
+    # We can get for invalid files sometimes the contents:
+    # {"error": "an unknown error occurred accessing this file"}
+    # This is a 58-byte file, but let's be tolerant and try loading
+    # anything less than 200 as JSON and detect a dict with a single
+    # "error" entry.
+    if verify_size and local_file_size < 200:
+        try:
+            data = json.loads(outfile.read_text('utf-8'))
+        except Exception:
+            pass
+        else:
+            if isinstance(data, dict) and list(data) == ['error']:
+                raise RuntimeError(
+                    f'Error downloading:\n{outfile}:\n'
+                    f'Got JSON error response contents:\n{data}'
+                )
 
 
 async def _download_files(*,
@@ -566,7 +588,8 @@ def _iterate_filenames(
     dataset_id: str,
     tag: str,
     max_retries: int,
-    root: str = ''
+    root: str = '',
+    include: Iterable[str] = tuple(),
 ) -> Generator[dict, None, None]:
     """Iterate over all files in a dataset, yielding filenames."""
     directories = list()
@@ -579,6 +602,37 @@ def _iterate_filenames(
             yield entity
 
     for directory in directories:
+        # Only bother with directories that are in the include list
+        if include:
+            # Take the example:
+            #
+            # --include="sub-CON001/*.eeg"
+            #
+            # or
+            #
+            # --include="sub-CON001"
+            #
+            # or
+            #
+            # --include="sub-CON001/*"
+            #
+            # All three of these should traverse `sub-CON001` and its
+            # subdirectories.
+            n_parts = len(PosixPath(root).parts)
+            dir_include = [PosixPath(inc) for inc in include]
+            dir_include = [  # for stuff like sub-CON001/*
+                '/'.join(inc.parts[:n_parts] + ('*',))
+                for inc in dir_include
+                if len(inc.parts) >= n_parts
+            ] + [  # and stuff like sub-CON001/*.eeg
+                '/'.join(inc.parts[:n_parts - 1] + ('*',))
+                for inc in dir_include
+                if len(inc.parts) >= n_parts - 1 and len(inc.parts) > 1
+            ]  # we want to traverse sub-CON001 in both cases
+            matches_include, _ = _match_include_exclude(
+                directory['filename'], include=dir_include, exclude=[])
+            if dir_include and not any(matches_include):
+                continue
         # Query filenames
         this_dir = directory['filename']
         metadata = _get_download_metadata(
@@ -594,9 +648,25 @@ def _iterate_filenames(
             tag=tag,
             max_retries=max_retries,
             root=this_dir,
+            include=include,
         )
         for path in dir_iterator:
             yield path
+
+
+def _match_include_exclude(
+    filename: str,
+    *,
+    include: Iterable[str],
+    exclude: Iterable[str],
+) -> bool:
+    """Check if a filename matches an include or exclude pattern."""
+    matches_keep = [filename.startswith(i) or fnmatch.fnmatch(filename, i)
+                    for i in include]
+    matches_remove = [filename.startswith(e) or
+                      fnmatch.fnmatch(filename, e)
+                      for e in exclude]
+    return matches_keep, matches_remove
 
 
 def download(*,
@@ -659,6 +729,7 @@ def download(*,
         target_dir = Path(dataset)
     else:
         target_dir = Path(target_dir)
+    target_dir = target_dir.expanduser().resolve()
 
     include = [include] if isinstance(include, str) else include
     include = [] if include is None else list(include)
@@ -703,7 +774,8 @@ def download(*,
 
     for file in tqdm(
         _iterate_filenames(
-            these_files, dataset_id=dataset, tag=tag, max_retries=max_retries
+            these_files, dataset_id=dataset, tag=tag, max_retries=max_retries,
+            include=include,
         ),
         desc=_unicode(
             f'Traversing directories for {dataset}', end='', emoji='📁'
@@ -725,12 +797,9 @@ def download(*,
                 include_counts[include.index(filename)] += 1
             continue
 
-        matches_keep = [filename.startswith(i) or fnmatch.fnmatch(filename, i)
-                        for i in include]
-        matches_remove = [filename.startswith(e) or
-                          fnmatch.fnmatch(filename, e)
-                          for e in exclude]
-        if (not include or any(matches_keep)) and not any(matches_remove):
+        matches_keep, matches_exclude = _match_include_exclude(
+            filename, include=include, exclude=exclude)
+        if (not include or any(matches_keep)) and not any(matches_exclude):
             files.append(file)
             # Keep track of include matches.
             if any(matches_keep):
@@ -749,7 +818,7 @@ def download(*,
                 else:
                     extra = (
                         'There were no similar filenames found in the '
-                        'metadata.'
+                        'metadata. '
                     )
                 raise RuntimeError(
                     f'Could not find path in the dataset:\n- {this}\n{extra}'
