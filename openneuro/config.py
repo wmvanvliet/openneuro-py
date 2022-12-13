@@ -1,9 +1,13 @@
-from typing import TypedDict
 from pathlib import Path
 import os
+import sys
 import stat
 import json
 import getpass
+if sys.version_info >= (3, 8):
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
 
 import appdirs
 from tqdm.auto import tqdm
@@ -29,10 +33,10 @@ def init_config() -> None:
                'My Account → Obtain an API Key')
     api_key = getpass.getpass('OpenNeuro API key (input hidden): ')
 
-    config = Config(
-        endpoint=BASE_URL,
-        apikey=api_key,
-    )
+    config: Config = {
+        'endpoint': BASE_URL,
+        'apikey': api_key,
+    }
 
     with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=2)
