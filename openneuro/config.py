@@ -43,8 +43,7 @@ def get_token() -> str:
 
     Returns
     -------
-    str
-        The API token if configured.
+    The API token if configured.
 
     Raises
     ------
