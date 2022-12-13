@@ -28,7 +28,7 @@ def init_config() -> None:
     tqdm.write('🙏 Please login to your OpenNeuro account and go to: '
                'My Account → Obtain an API Key')
     api_key = getpass.getpass('OpenNeuro API key (input hidden): ')
-    
+
     config = Config(
         endpoint=BASE_URL,
         apikey=api_key,

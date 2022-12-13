@@ -13,7 +13,7 @@ def test_config(tmp_path: Path):
         with mock.patch('getpass.getpass', lambda _: 'test'):
             init_config()
         assert openneuro.config.CONFIG_PATH.exists()
-        
+
         expected_config = Config(endpoint='https://openneuro.org/', apikey='test')
         assert load_config() == expected_config
         assert get_token() == 'test'
